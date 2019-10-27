@@ -15,3 +15,5 @@ scratch/
 data/hetionet/
 .cache
 .idea/
+
+experiments/results/*seed*.pkl

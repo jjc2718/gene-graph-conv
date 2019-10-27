@@ -24,6 +24,9 @@ parser.add_argument('--dataset', default='tcga', type=str,
 parser.add_argument('--edge', default=None, type=str,
                     help='Edge type for HetIO graph [interaction, regulation, covariation] and Stringdb ['
                          'neighborhood, fusion, cooccurence, coexpression, experimental, database, textmining, all]')
+parser.add_argument('--nodes_rand', default=-1, type=int,
+                    help='Choose a random number of genes to use as neighbors, note this\
+                          will override the graph option if included')
 parser.add_argument('--results', default='all_nodes', type=str,
                     help='Name of file to save results to. Default - all_nodes')
 parser.add_argument('--seed', default=0, type=int, help='Seed for training')
@@ -32,6 +35,7 @@ parser.add_argument('--rand', default=False, type=bool, help='Randomize graph ?'
 args = parser.parse_args()
 print(args)
 seed = args.seed
+np.random.seed(seed)
 randomize = args.rand
 
 # Setup the results dictionary
@@ -71,6 +75,10 @@ if args.graph:
             gene_graph = graph_dict[graph_name](randomize=randomize)
         is_first_degree = True
         is_landmark = False
+elif args.nodes_rand > 0:
+    is_first_degree = False
+    is_landmark = False
+    graph_name = "R-{}".format(args.nodes_rand)
 else:
     is_first_degree = False
     is_landmark = False
@@ -84,7 +92,7 @@ try:
     elif args.dataset == 'gtex':
         dataset = GTexDataset()
     elif args.dataset == 'geo':
-        dataset = GEODataset(file_path='/network/data1/genomics/D-GEX/bgedv2.hdf5', 
+        dataset = GEODataset(file_path='/network/data1/genomics/D-GEX/bgedv2.hdf5',
                              seed=seed, load_full=False, nb_examples=40000)
 
 except Exception:
@@ -95,8 +103,8 @@ except Exception:
     sys.exit()
 
 # Create list of the genes to perform inference on
-# If assessing first-degree neighbours, then train only for those genes 
-# that are there in the graph 
+# If assessing first-degree neighbours, then train only for those genes
+# that are there in the graph
 which_genes = dataset.df.columns.tolist()
 if args.graph and args.graph != 'landmark':
     which_genes = set(gene_graph.nx_graph.nodes).intersection(which_genes)
@@ -121,8 +129,6 @@ print("done: " + str(len(results)))
 
 name = "{}_seed{}.pkl".format(args.results, seed)
 for row in tqdm(todo, desc=name):
-#    if len(results) % 100 == 0:
-#        print("\nRemaining: {}".format(len(results)))
     gene = row["gene"]
     seed = seed
     model = MLP(column_names=dataset.df.columns, num_layer=1, dropout=False,
@@ -157,6 +163,15 @@ for row in tqdm(todo, desc=name):
         else:
             neighbors = list(gene_graph.first_degree(gene)[0])
             neighbors = [n for n in neighbors if n in X_train.columns.values]
+        X_train = X_train.loc[:, neighbors].copy()
+        X_test = X_test.loc[:, neighbors].copy()
+    elif args.nodes_rand > 0:
+        # create "R-n" graph by choosing n random nodes (genes) as neighbors
+        # don't worry about choosing target gene for now, may eventually want
+        # to remove it
+        neighbors = np.zeros_like(X_train.columns.values).astype('bool')
+        neighbors[:args.nodes_rand] = True
+        np.random.shuffle(neighbors)
         X_train = X_train.loc[:, neighbors].copy()
         X_test = X_test.loc[:, neighbors].copy()
     else:
