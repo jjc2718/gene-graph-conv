@@ -31,7 +31,9 @@ parser.add_argument('--results', default='all_nodes', type=str,
                     help='Name of file to save results to. Default - all_nodes')
 parser.add_argument('--seed', default=0, type=int, help='Seed for training')
 parser.add_argument('--rand', default=False, type=bool, help='Randomize graph ?')
-
+parser.add_argument('--percentile', default=50, type=int,
+                    help='If included, use a percentile of gene expression distribution\
+                          as cutoff for classification (default is above/below mean)')
 args = parser.parse_args()
 print(args)
 seed = args.seed
@@ -144,8 +146,20 @@ for row in tqdm(todo, desc=name):
         "seed": seed,
         "train_size": train_size,
     }
-    dataset.labels = dataset.df[gene].where(dataset.df[gene] > 0).notnull().astype("int")
+    if args.percentile != 50:
+        gene_percentile = np.percentile(dataset.df[gene].values, args.percentile)
+        dataset.labels = dataset.df[gene].where(dataset.df[gene] > gene_percentile).notnull().astype("int")
+    else:
+        dataset.labels = dataset.df[gene].where(dataset.df[gene] > 0).notnull().astype("int")
     dataset.labels = dataset.labels.values if type(dataset.labels) == pd.Series else dataset.labels
+
+    # if labels are chosen such that only one class exists, skip the gene
+    # otherwise this throws a cuda device-side assert which breaks all
+    # subsequent experiments
+    if np.unique(dataset.labels).shape[0] == 1:
+        experiment['error'] = 'Expression distribution too narrow, skipping'
+        results = record_result(results, experiment, filename)
+        continue
 
     try:
         X_train, X_test, y_train, y_test = sklearn.model_selection.train_test_split(dataset.df, dataset.labels,
